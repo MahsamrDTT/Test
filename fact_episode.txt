@@ -1,0 +1,324 @@
+TRUNCATE TABLE [Staging].[fact_episode];
+
+-- Getting all the episode data in from the WRK
+;With episode_data as (
+
+SELECT
+	episode_key,																				--ROW_NUMBER() OVER (ORDER BY (SELECT NULL))													AS episode_key,
+	episode_id,
+    cast(episode_number as varchar)																AS episode_number,
+	Null																						AS organisation_key,
+	Null																						AS patient_key,
+	Null																						AS diagnosis_key,
+	Null																						AS leave_key,
+	episode_type,
+	establishment_id,																			-- no linkage between establishment and episode tables yet
+    patient_id,
+    episode_start_date,
+    episode_end_date,
+    episode_end_mode,
+    episode_start_mode,
+--	Foreign key Patient_setting_key, 
+	episode_leave_days,
+    MH_legal_status_mapped_value																AS mental_health_legal_status,								
+    MH_care_referral_mapped_value																AS referral,									
+    null																						AS primary_diagnosis,
+    null																						AS additional_diagnosis,
+    null																						AS area_of_usual_residence_sa2,
+	indigenous_status_mapped_value																AS indigenous_status,				
+	marital_status_mapped_value																	AS marital_status,					
+	sex_mapped_value																			AS sex,								
+	Null																						AS Gender,		-- Gender not sbmitted for submission yet (Placeholder)	
+    team_id,
+	agency_mapping,
+	combined_agency_patient_id,
+	final_mental_health_person_group_id,
+	created_datetime,
+    last_updated_datetime,
+	source_system_id
+
+FROM [WRK].[episode] 
+)
+-- (1055005 rows affected)
+
+
+-- Joining on the Organisation table
+
+, Org_table_join AS (
+    
+	SELECT 
+	  a.episode_key
+	, a.episode_id
+    , a.episode_number
+	-- org info
+	, org.organisation_key	
+	, org.team_id
+	
+	, a.episode_type
+	, a.establishment_id																												-- no linkage between establishment and episode tables yet
+    , a.patient_id
+    , a.episode_start_date
+    , a.episode_end_date
+    , a.episode_end_mode
+    , a.episode_start_mode
+
+--	Foreign key Patient_setting_key, 
+	, a.episode_leave_days
+    , a.mental_health_legal_status																									
+    , a.referral																									
+    , a.primary_diagnosis																						
+    , a.additional_diagnosis
+    , a.area_of_usual_residence_sa2
+	, a.indigenous_status
+	, a.marital_status			
+	, a.sex			
+	, a.Gender				
+	, a.team_id																			AS Episode_team	
+	, a.agency_mapping
+	, a.combined_agency_patient_id
+	, a.final_mental_health_person_group_id
+	, a.source_system_id
+
+FROM episode_data a
+	LEFT JOIN 
+	staging.ref_mental_health_organisational_hierarchy org
+    ON
+		CAST(a.Team_ID AS VARCHAR) = org.team_id    --CAST(org.team_id AS VARCHAR)
+    AND 
+		a.episode_start_date BETWEEN org.master_start_date AND org.master_end_date
+
+)  
+
+-- Joining on the Organisation table
+
+, person_join AS (
+    SELECT 
+
+	  a.episode_key
+	, a.episode_id
+    , a.episode_number
+	-- org info
+	, a.organisation_key	
+	, a.team_id
+	-- person information
+	, patient.person_key																AS patient_key
+	
+	, a.episode_type
+	, a.establishment_id																												-- no linkage between establishment and episode tables yet
+    , a.patient_id
+    , a.episode_start_date
+    , a.episode_end_date
+    , a.episode_end_mode
+    , a.episode_start_mode
+
+--	Foreign key Patient_setting_key, 
+	, a.episode_leave_days
+    , a.mental_health_legal_status																									
+    , a.referral																									
+    , a.primary_diagnosis																						
+    , a.additional_diagnosis
+    , a.area_of_usual_residence_sa2
+	, a.indigenous_status
+	, a.marital_status			
+	, a.sex			
+	, a.Gender				
+	, a.team_id																			AS Episode_team	
+	, a.agency_mapping
+	, a.combined_agency_patient_id
+	, a.final_mental_health_person_group_id
+	, a.source_system_id
+
+FROM 
+	Org_table_join a
+	LEFT JOIN 																			
+	staging.dim_person patient
+ON 
+	a.final_mental_health_person_group_id = patient.final_mental_health_person_group_id
+
+
+)
+
+, diagnosis_join AS (
+
+  SELECT 
+
+	  a.episode_key
+	, a.episode_id
+    , a.episode_number
+	-- org info
+	, a.organisation_key	
+	, a.team_id
+	-- person information
+	, a.patient_key
+	-- diagnosis information
+	, diagnosis.diagnosis_key																AS diagnosis_key
+
+	, a.episode_type
+	, a.establishment_id																												-- no linkage between establishment and episode tables yet
+    , a.patient_id
+    , a.episode_start_date
+    , a.episode_end_date
+    , a.episode_end_mode
+    , a.episode_start_mode
+
+--	Foreign key Patient_setting_key, 
+	, a.episode_leave_days
+    , a.mental_health_legal_status																									
+    , a.referral																									
+    , a.primary_diagnosis																						
+    , a.additional_diagnosis
+    , a.area_of_usual_residence_sa2
+	, a.indigenous_status
+	, a.marital_status			
+	, a.sex			
+	, a.Gender				
+	, a.team_id																			AS Episode_team	
+	, a.agency_mapping
+	, a.combined_agency_patient_id
+	, a.final_mental_health_person_group_id
+	, a.source_system_id
+
+FROM 
+	person_join a
+	LEFT JOIN 																			
+	WRK.flattened_diagnosis diagnosis
+ON 
+	a.episode_id = diagnosis.episode_id
+
+	
+) 
+, leave_join AS (
+
+  SELECT 
+
+	  a.episode_key
+	, a.episode_id
+    , a.episode_number
+	-- org info
+	, a.organisation_key	
+	, a.team_id
+	-- person information
+	, a.patient_key
+	-- diagnosis information
+	, a.diagnosis_key																AS diagnosis_key
+	-- leave information
+	, leave.leave_days_key															AS leave_key
+
+	, a.episode_type
+	, a.establishment_id																												-- no linkage between establishment and episode tables yet
+    , a.patient_id
+    , a.episode_start_date
+    , a.episode_end_date
+	,leave.leave_start_date,
+	leave.leave_end_date
+    , a.episode_end_mode
+    , a.episode_start_mode
+
+--	Foreign key Patient_setting_key, 
+	, a.episode_leave_days
+    , a.mental_health_legal_status																									
+    , a.referral																									
+    , a.primary_diagnosis																						
+    , a.additional_diagnosis
+    , a.area_of_usual_residence_sa2
+	, a.indigenous_status
+	, a.marital_status			
+	, a.sex			
+	, a.Gender				
+	, a.team_id																			AS Episode_team	
+	, a.agency_mapping
+	, a.combined_agency_patient_id
+	, a.final_mental_health_person_group_id
+	, a.source_system_id
+
+FROM 
+	diagnosis_join a
+	LEFT JOIN 																			
+	[Staging].[Dim_leave_days_agg] leave
+ON 
+	a.episode_number = leave.source_number
+	AND leave.leave_start_date between a.episode_start_date and a.episode_end_date
+
+)
+--select episode_key,count(*) from leave_join group by episode_key having count(*)>1
+--select * from leave_join where episode_key='746857'
+
+--select * from [Staging].[Dim_leave_days] leave where source_number = '00996748'
+
+INSERT INTO [Staging].[fact_episode] (
+    episode_key,
+    episode_ID,
+    episode_number,
+    patient_key,
+	organisation_key,
+    diagnosis_key,
+	leave_key,
+	episode_type,
+    Establishment_id,
+    patient_id,
+    episode_start_date,
+    episode_end_date,
+    episode_start_mode,
+    episode_end_mode,
+    episode_leave_days,
+    mental_health_legal_status,
+    referral,
+    primary_diagnosis,
+    area_of_usual_residence_sa2,
+    indigenous_status,
+    Marital_Status,
+    sex,
+	gender,
+    team_id,
+    agency_mapping,
+    combined_agency_patient_id,
+    final_mental_health_group_id,
+	created_datetime,
+	last_updated_datetime,
+    source_system_id
+)
+
+
+
+
+    SELECT
+          episode_key
+		, episode_id
+		, episode_number
+		, patient_key
+		, organisation_key
+		, diagnosis_key
+		, leave_key
+		, episode_type
+		, establishment_id
+		, patient_id
+		, episode_start_date
+		, episode_end_date
+		, episode_start_mode
+		, episode_end_mode
+		, episode_leave_days
+		, mental_health_legal_status
+		, referral
+		, primary_diagnosis
+		, area_of_usual_residence_sa2
+		, indigenous_status
+		, marital_status
+		, sex
+		, Gender
+		, team_id 
+		, agency_mapping
+		, combined_agency_patient_id
+		, final_mental_health_person_group_id
+		, GETDATE()																							AS created_datetime										
+		, GETDATE()																							AS last_updated_datetime	
+		, source_system_id
+		
+    FROM
+       leave_join
+
+
+--select * from dMentalHealth01.staging.dim_person where person_number = '036140'
+--select * from dMentalHealth01.wrk.person where final_mental_health_person_group_id = '037464_CCC'
+
+
+END
